@@ -40,11 +40,11 @@ namespace YaR.MailRuCloud.Api
         public CloudSettings Settings => _settings;
         private readonly CloudSettings _settings;
 
-		/// <summary>
-		/// Gets or sets account to connect with cloud.
-		/// </summary>
-		/// <value>Account info.</value>
-		public Account Account { get; }
+        /// <summary>
+        /// Gets or sets account to connect with cloud.
+        /// </summary>
+        /// <value>Account info.</value>
+        public Account Account { get; }
 
 
         /// <summary>
@@ -57,7 +57,7 @@ namespace YaR.MailRuCloud.Api
         /// </summary>
         public MailRuCloud(CloudSettings settings, Credentials credentials)
         {
-	        _settings = settings;
+            _settings = settings;
             Account = new Account(settings, credentials);
             if (!Account.Login())
             {
@@ -102,14 +102,14 @@ namespace YaR.MailRuCloud.Api
 
             path = WebDavPath.Clean(path);
 
-	        if (_settings.CacheListingSec > 0)
-	        {
-		        var cached = CacheGetEntry(path);
-		        if (cached != null)
-			        return cached;
-	        }
+            if (_settings.CacheListingSec > 0)
+            {
+                var cached = CacheGetEntry(path);
+                if (cached != null)
+                    return cached;
+            }
 
-	        //TODO: subject to refact!!!
+            //TODO: subject to refact!!!
             var ulink = resolveLinks ? await _linkManager.GetItemLink(path) : null;
 
             // bad link detected, just return stub
@@ -137,17 +137,17 @@ namespace YaR.MailRuCloud.Api
                 return null;
 
             if (itemType == ItemType.Unknown)
-                itemType = entry is Folder 
-                    ? ItemType.Folder 
+                itemType = entry is Folder
+                    ? ItemType.Folder
                     : ItemType.File;
 
             if (itemType == ItemType.Folder && entry is Folder folder) // fill folder with links if any
                 FillWithULinks(folder);
 
             if (_settings.CacheListingSec > 0)
-		        CacheAddEntry(entry);
+                CacheAddEntry(entry);
 
-	        return entry;
+            return entry;
         }
 
         private void FillWithULinks(Folder folder)
@@ -185,28 +185,28 @@ namespace YaR.MailRuCloud.Api
 
 
         private void CacheAddEntry(IEntry entry)
-	    {
-			if (entry is File cfile)
-			{
-				_itemCache.Add(cfile.FullPath, cfile);
-			}
-			else if (entry is Folder cfolder && cfolder.IsChildsLoaded)
-		    {
-				_itemCache.Add(cfolder.FullPath, cfolder);
-				_itemCache.Add(cfolder.Files.Select(f => new KeyValuePair<string, IEntry>(f.FullPath, f)));
+        {
+            if (entry is File cfile)
+            {
+                _itemCache.Add(cfile.FullPath, cfile);
+            }
+            else if (entry is Folder cfolder && cfolder.IsChildsLoaded)
+            {
+                _itemCache.Add(cfolder.FullPath, cfolder);
+                _itemCache.Add(cfolder.Files.Select(f => new KeyValuePair<string, IEntry>(f.FullPath, f)));
 
-				foreach (var childFolder in cfolder.Entries)
-				    CacheAddEntry(childFolder);
-			}
-		}
+                foreach (var childFolder in cfolder.Entries)
+                    CacheAddEntry(childFolder);
+            }
+        }
 
-	    private IEntry CacheGetEntry(string path)
-	    {
-		    var cached = _itemCache.Get(path);
+        private IEntry CacheGetEntry(string path)
+        {
+            var cached = _itemCache.Get(path);
             return cached;
         }
 
-	    public virtual IEntry GetItem(string path, ItemType itemType = ItemType.Unknown, bool resolveLinks = true)
+        public virtual IEntry GetItem(string path, ItemType itemType = ItemType.Unknown, bool resolveLinks = true)
         {
             return GetItemAsync(path, itemType, resolveLinks).Result;
         }
@@ -248,11 +248,11 @@ namespace YaR.MailRuCloud.Api
         {
             var res = (await Account.RequestRepo.Publish(fullPath))
                 .ThrowIf(r => !r.IsSuccess, r => new Exception($"Publish error, path = {fullPath}"));
-                
+
             return res.Url;
         }
 
-        public async Task<PublishInfo> Publish(File file, bool makeShareFile = true, bool generateDirectVideoLink = false, bool makeM3UFile = false)
+        public async Task<PublishInfo> Publish(File file, bool makeShareFile = true, bool generateDirectVideoLink = false, bool makeM3UFile = false, string videoQuality = "")
         {
             if (file.Files.Count > 1 && (generateDirectVideoLink || makeM3UFile))
                 throw new ArgumentException($"Cannot generate direct video link for splitted file {file.FullPath}");
@@ -274,18 +274,60 @@ namespace YaR.MailRuCloud.Api
 
             if (makeM3UFile)
             {
-                string path = $"{file.FullPath}{PublishInfo.PlaylistFilePostfix}";
-                var content = new StringBuilder();
+                foreach (var item in info.Items)
                 {
-                    content.Append("#EXTM3U\r\n");
-                    foreach (var item in info.Items)
+                    Dictionary<string, string> allQualityVideoItems;
+
+                    using (WebClient client = new WebClient())
                     {
-                        content.Append($"#EXTINF:-1,{WebDavPath.Name(item.Path)}\r\n");
-                        content.Append($"{item.PlaylistUrl}\r\n");
+                        // https://tinyurl.com/y4k8pd56
+                        string playlists = client.DownloadString(item.PlaylistUrl);
+                        allQualityVideoItems = Regex.Matches(playlists, @"#.+RESOLUTION=(?<resolution>\d+x\d+)\s+(?<url>/.*)\s?")
+                            .Cast<Match>()
+                            .ToDictionary(m => m.Groups["resolution"].Value, m => m.Value);
+                    }
+
+                    string serverUrl = item.PlaylistUrl.Substring(0, item.PlaylistUrl.IndexOf("/", 9));
+                    IEnumerable<KeyValuePair<string, string>> selectedVideoItems;
+
+                    switch (videoQuality.ToLower())
+                    {
+                        case "low":
+                        case "high":
+                            var invertMaxToMin = videoQuality.Equals("low", StringComparison.InvariantCultureIgnoreCase);
+                            selectedVideoItems = new[] {
+                                allQualityVideoItems.Aggregate((kvCur, kvNext) =>
+                                // compare first part of resolution, find max
+                                (int.Parse(kvCur.Key.Split('x').First()) > int.Parse(kvNext.Key.Split('x').First()))
+                                // if variable TRUE - invert compare result by XOR operation
+                                ^ invertMaxToMin
+                                ? kvCur : kvNext)
+                            };
+                            break;
+
+                        default:
+                            selectedVideoItems = allQualityVideoItems.Where(r => r.Key.IndexOf(videoQuality) > -1);
+                            if(selectedVideoItems.Count() == 0)
+                            {
+                                selectedVideoItems = allQualityVideoItems.AsEnumerable();
+                            }
+                            break;
+                    }
+
+                    foreach (var playlistItem in selectedVideoItems)
+                    {
+                        string path = $"{file.FullPath}_{playlistItem.Key}{PublishInfo.PlaylistFilePostfix}";
+
+                        var endFirstLine = playlistItem.Value.IndexOf("\n");
+
+                        var content = new StringBuilder()
+                            .Append("#EXTM3U\r\n")
+                            .Append(playlistItem.Value.Insert(endFirstLine + 1, serverUrl));
+
+                        UploadFile(path, content.ToString())
+                            .ThrowIf(r => !r, r => new Exception($"Cannot upload JSON file, path = {path}"));
                     }
                 }
-                UploadFile(path, content.ToString())
-                    .ThrowIf(r => !r, r => new Exception($"Cannot upload JSON file, path = {path}"));
             }
 
             return info;
@@ -307,12 +349,12 @@ namespace YaR.MailRuCloud.Api
             return info;
         }
 
-        public async Task<PublishInfo> Publish(IEntry entry, bool makeShareFile = true, bool generateDirectVideoLink = false, bool makeM3UFile = false)
+        public async Task<PublishInfo> Publish(IEntry entry, bool makeShareFile = true, bool generateDirectVideoLink = false, bool makeM3UFile = false, string videoQuality = "")
         {
             if (null == entry) throw new ArgumentNullException(nameof(entry));
 
             if (entry is File file)
-                return await Publish(file, makeShareFile, generateDirectVideoLink, makeM3UFile);
+                return await Publish(file, makeShareFile, generateDirectVideoLink, makeM3UFile, videoQuality);
             if (entry is Folder folder)
                 return await Publish(folder, makeShareFile);
 
@@ -488,7 +530,7 @@ namespace YaR.MailRuCloud.Api
         /// <param name="folder">Source folder info.</param>
         /// <param name="newFileName">New folder name.</param>
         /// <returns>True or false operation result.</returns>
-        public async Task<bool> Rename(Folder folder, string newFileName) 
+        public async Task<bool> Rename(Folder folder, string newFileName)
             => await Rename(folder.FullPath, newFileName);
 
         /// <summary>
@@ -614,7 +656,7 @@ namespace YaR.MailRuCloud.Api
 
                 var linkdest = WebDavPath.ModifyParent(linka.MapPath, WebDavPath.Parent(folder.FullPath), destinationPath);
                 var cloneres = await CloneItem(linkdest, linka.Href);
-                if (cloneres.IsSuccess )
+                if (cloneres.IsSuccess)
                 {
                     _itemCache.Invalidate(destinationPath);
                     if (WebDavPath.Name(cloneres.Path) != linka.Name)
@@ -906,7 +948,7 @@ namespace YaR.MailRuCloud.Api
         {
             var data = Encoding.UTF8.GetBytes(content);
             return UploadFile(path, data, discardEncryption);
-            
+
         }
 
         public bool UploadFileJson<T>(string fullFilePath, T data, bool discardEncryption = false)
