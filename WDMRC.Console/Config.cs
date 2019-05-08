@@ -60,5 +60,21 @@ namespace YaR.CloudMailRu.Console
 
             }
         }
+
+        public static string DefaultVideoQuality
+        {
+            get
+            {
+                try
+                {
+                    var res = Document.SelectSingleNode("/config/DefaultVideoQuality").InnerText;
+                    return res;
+                }
+                catch (Exception)
+                {
+                    return "all";
+                }
+            }
+        }
     }
 }

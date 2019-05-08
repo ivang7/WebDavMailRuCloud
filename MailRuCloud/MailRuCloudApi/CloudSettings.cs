@@ -20,5 +20,7 @@ namespace YaR.MailRuCloud.Api
 
         public string SpecialCommandPrefix { get; set; } = ">>";
         public string AdditionalSpecialCommandPrefix { get; set; } = ">>";
+
+        public string DefaultVideoQuality { get; set; } = "all";
     }
 }
